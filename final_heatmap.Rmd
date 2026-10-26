@@ -1,0 +1,241 @@
+---
+title: "Heatmap"
+author: "Yuning Liu"
+date: "2025-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("stringr")
+require(stringr)
+#install.packages("qqman")
+library(qqman)
+#install.packages("ggrepel")
+require(ggrepel)
+
+#install.packages("purrr")
+require(purrr)
+
+#install.packages("gt")
+#install.packages("webshot2")
+        
+```
+
+
+#Loading the dataset
+```{r}
+
+# Cluster-ordered CpG list
+cpg_list <- c(
+  "cg01409343", "cg18942579", "cg16936953", "cg12054453", "cg00490406",
+  "cg01059398", "cg21979287", "cg08818207", "cg27537252", "cg03425812",
+  "cg12828896", "cg03957124", "cg16306654", "cg03753191", "cg07878065",
+  "cg04176813", "cg07839457", "cg16411857",  # Cluster 1
+  "cg23387863", "cg23904266", "cg09249800", "cg11699125", "cg14496081",
+  "cg07830828", "cg02068052",               # Cluster 2
+  "cg24741430", "cg10636246", "cg13575798", "cg26140475", "cg09801824"   # Cluster 3
+)
+
+da.methylome_pheno
+da.methylome_pheno_df <- as.data.frame(da.methylome_pheno)
+head(da.methylome_pheno_df)
+
+da.CpGs_INT
+da.CpGs_df <- as.data.frame(da.CpGs_INT)
+da.CpGs_df$id <- rownames(da.CpGs_df)
+View(da.CpGs_df)
+
+
+da.ratio_kt
+da.ratio_kt_df <- as.data.frame(da.ratio_kt)
+
+ewas_reg_cpgs <- da.CpGs_df[, c(cpg_list, "id")]
+View(ewas_reg_cpgs)
+
+
+#Extract outcomes of interest and covariates for the regression analysis
+ewas_reg_outcome <- da.methylome_pheno_df[,c("id","egfrcrcys_v5","GENDER51","CENTER","V5AGE51","RACEGRP51", "acr_v5")]
+View(ewas_reg_outcome)
+
+ewas_merged <- merge(ewas_reg_outcome, ewas_reg_cpgs, by = "id")
+View(ewas_merged)
+
+incidents <- read_dta("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/inc_esrd_by20.dta")
+View(incidents)
+colnames(incidents)
+
+# Merge using a left join: keep all rows in ewas_merged
+ewas_merged <- merge(ewas_merged, incidents, by = "id", all.x = TRUE)
+
+View(ewas_merged)
+
+#Change eGFR into low eGFR
+ewas_merged$low_eGFR <- -1 * ewas_merged$egfrcrcys_v5
+
+#inverse normal transformation of 
+invnorm_transform <- function(x) {
+  qnorm((rank(x, na.last = "keep") - 0.5) / sum(!is.na(x)))
+}
+ewas_merged$low_egfr_INT <- invnorm_transform(ewas_merged$low_eGFR)
+ewas_merged$acr_INT <- invnorm_transform(ewas_merged$acr_v5)
+
+```
+
+
+
+
+
+```{r cars}
+
+# ESRD Cox model (WHITE only)
+cox_results <- lapply(cpg_list, function(cpg) {
+  formula <- as.formula(paste0("Surv(fu_esrd50_def1_v1, inc_esrd50crcys_def1_v5) ~ ", 
+                               cpg, " + GENDER51 + V5AGE51 + CENTER"))
+  model <- coxph(formula, data = subset(ewas_merged, RACEGRP51 == "W"))
+  coef <- summary(model)$coefficients
+  if (cpg %in% rownames(coef)) {
+    row <- coef[cpg, ]
+    return(data.frame(CpG = cpg, Outcome = "ESRD", Beta = row["coef"], pValue = row["Pr(>|z|)"]))
+  } else {
+    return(NULL)
+  }
+})
+esrd_df <- do.call(rbind, cox_results)
+
+# ------------------------
+# Linear model: low eGFR (WHITE only)
+egfr_results <- lapply(cpg_list, function(cpg) {
+  formula <- as.formula(paste0("low_egfr_INT ~ ", cpg, " + V5AGE51 + GENDER51 + CENTER"))
+  model <- lm(formula, data = subset(ewas_merged, RACEGRP51 == "W"))
+  coef <- summary(model)$coefficients
+  if (cpg %in% rownames(coef)) {
+    row <- coef[cpg, ]
+    return(data.frame(CpG = cpg, Outcome = "low_eGFR", Beta = row["Estimate"], pValue = row["Pr(>|t|)"]))
+  } else {
+    return(NULL)
+  }
+})
+egfr_df <- do.call(rbind, egfr_results)
+
+# ------------------------
+# Linear model: ACR (WHITE only)
+uacr_results <- lapply(cpg_list, function(cpg) {
+  formula <- as.formula(paste0("acr_INT ~ ", cpg, " + V5AGE51 + GENDER51 + CENTER"))
+  model <- lm(formula, data = subset(ewas_merged, RACEGRP51 == "W"))
+  coef <- summary(model)$coefficients
+  if (cpg %in% rownames(coef)) {
+    row <- coef[cpg, ]
+    return(data.frame(CpG = cpg, Outcome = "uACR", Beta = row["Estimate"], pValue = row["Pr(>|t|)"]))
+  } else {
+    return(NULL)
+  }
+})
+uacr_df <- do.call(rbind, uacr_results)
+
+# ------------------------
+# Combine results and prepare for heatmap
+plot_df <- bind_rows(egfr_df, uacr_df, esrd_df) %>%
+  mutate(
+    Signif = ifelse(pValue < 0.05, "*", ""),
+    CpG = factor(CpG, levels = cpg_list),
+    Outcome = factor(Outcome, levels = c("low_eGFR", "uACR", "ESRD"))
+  )
+
+
+plot_df$CpG <- factor(plot_df$CpG, levels = rev(cpg_list))
+plot_df$Outcome <- recode(plot_df$Outcome,
+                          "low_eGFR" = "Low eGFR",
+                          "uACR" = "uACR",
+                          "ESRD" = "ESRD")
+
+
+
+# ------------------------
+# Plot heatmap
+heatmap <- ggplot(plot_df, aes(x = Outcome, y = CpG, fill = Beta)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Signif), size = 4, color = "black") +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0,
+    name = "Beta Coefficient"
+  ) +
+  labs(
+    title = "CpG Associations with Kidney Outcomes (White Participants)",
+    caption = "* denotes p < 0.05",
+    x = "Outcome", y = "CpG Site"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 6),
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+    plot.caption = element_text(hjust = 0)
+  )
+
+# ------------------------
+
+# dev.copy2pdf()
+
+# Save the figure
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/04 Plots/final_heatmap.png", 
+       plot = heatmap, width = 8, height = 6, dpi = 300)
+
+
+```
+
+
+
+
+
+```{r pressure, echo=FALSE}
+
+beta_table <- plot_df %>%
+  select(CpG, Outcome, Beta) %>%
+  pivot_wider(names_from = Outcome, values_from = Beta)
+
+# View table
+print(beta_table)
+
+write_xlsx(full_table, "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/CpG_beta_pval_table.xlsx")
+
+```
+
+
+```{r}
+
+# Step 1: Pivot beta values to wide format
+beta_wide <- plot_df %>%
+  select(CpG, Outcome, Beta) %>%
+  pivot_wider(names_from = Outcome, values_from = Beta, names_prefix = "Beta_")
+
+# Step 2: Pivot p-values to wide format
+pval_wide <- plot_df %>%
+  select(CpG, Outcome, pValue) %>%
+  pivot_wider(names_from = Outcome, values_from = pValue, names_prefix = "pval_")
+
+# Step 3: Merge them
+full_table <- left_join(beta_wide, pval_wide, by = "CpG")
+
+# Step 4: (Optional) Arrange by your designated order
+full_table <- full_table %>%
+  mutate(CpG = factor(CpG, levels = cpg_list)) %>%
+  arrange(CpG)
+
+print(full_table)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

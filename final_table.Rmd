@@ -1,0 +1,132 @@
+---
+title: "compiled_result_table"
+author: "Yuning Liu"
+date: "2025-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("stringr")
+require(stringr)
+#install.packages("qqman")
+library(qqman)
+#install.packages("ggrepel")
+require(ggrepel)
+
+install.packages("purrr")
+require(purrr)
+
+install.packages("gt")
+install.packages("webshot2")
+```
+
+
+Gather information needed to construct the final table:
+
+Chromosome and position of each CpG
+
+Variance explained by genetics (e.g., %VE) for each CpG
+
+Associated protein(s) (list all for each CpG)
+
+Nearby genes (within certain base pairs or annotated directly)
+
+Clinical outcome associations:
+
+eGFR (effect estimate or p-value or direction)
+
+uACR
+
+ESRD
+
+
+```{r cars}
+
+KTR_white <- readRDS("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/EWAS_tk_ratio/ratio_kt_W.rds") #chr and pos and gene
+ve <- read.table("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/KTR_CpGs_genovar_gcta.txt", header=TRUE, sep = "\t") #VG_VP
+pqtm <- read_excel("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/protein_count_per_cpg.xlsx") #associated proteins
+
+View(KTR_white)
+View(ve)
+View (pqtm)
+
+#Cpg in clustered order
+cpg_list <- c(
+  "cg01409343", "cg18942579", "cg16936953", "cg12054453", "cg00490406",
+  "cg01059398", "cg21979287", "cg08818207", "cg27537252", "cg03425812",
+  "cg12828896", "cg03957124", "cg16306654", "cg03753191", "cg07878065",
+  "cg04176813", "cg07839457", "cg16411857", "cg23387863", "cg23904266",
+  "cg09249800", "cg11699125", "cg14496081", "cg07830828", "cg02068052",
+  "cg24741430", "cg10636246", "cg13575798", "cg26140475", "cg09801824"
+)
+
+```
+
+
+
+```{r pressure, echo=FALSE}
+# VE-selected
+ve_selected <- ve %>%
+  filter(CpG %in% cpg_list) %>%
+  select(CpG, VG_VP) %>%
+  mutate(CpG = factor(CpG, levels = cpg_list)) %>%
+  arrange(CpG)
+
+# pQTM-selected
+pqtm_selected <- pqtm %>%
+  filter(CpG %in% cpg_list) %>%
+  select(CpG, proteins) %>%
+  mutate(CpG = factor(CpG, levels = cpg_list)) %>%
+  arrange(CpG)
+
+# KTR metadata
+KTR_white_selected <- KTR_white %>%
+  filter(cpg %in% cpg_list) %>%
+  select(cpg, chr, pos, gene) %>%
+  rename(CpG = cpg) %>%
+  mutate(CpG = factor(CpG, levels = cpg_list)) %>%
+  arrange(CpG)
+
+merged_df <- list(ve_selected, pqtm_selected, KTR_white_selected) %>%
+  reduce(left_join, by = "CpG")
+```
+
+
+```{r}
+final_table <- list(
+  ve_selected,         # CpG + VG_VP
+  pqtm_selected,       # CpG + protein
+  KTR_white_selected   # CpG + chr, pos, gene
+) %>%
+  reduce(left_join, by = "CpG") 
+
+final_table <- final_table %>%
+  select(CpG, gene, VG_VP, proteins, everything())
+
+final_table
+
+library(writexl)
+
+write_xlsx(
+  final_table,
+  path = "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/final_table.xlsx"
+)
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

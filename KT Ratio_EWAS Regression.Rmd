@@ -1,0 +1,555 @@
+---
+title: "K/T Ratio EWAS Regression"
+author: "Yuning Liu"
+date: "2025-07-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("pheatmap")
+library(pheatmap)
+#install.packages("reshape2")
+library(reshape2)
+```
+
+#extract relevant CPG from the EWAS result that is statistically significant: 
+cg07839457	NLRC5
+cg11699125	ACOT7;ACOT7;ACOT7;ACOT7
+cg16411857	NLRC5
+cg21979287	B2M SeqId_10574_10 eqId_3485_28
+cg16936953	TMEM49
+cg18942579	TMEM49
+cg01059398	TNFSF10 eqId_8833_20
+cg16306654	ACOT7;ACOT7;ACOT7;ACOT7
+cg09801824	
+cg23387863	SGK269
+cg03425812	B2M
+cg12828896	B2M
+cg00490406	AIM2
+cg10636246	AIM2
+cg03753191	EPSTI1;EPSTI1
+cg23904266	SEC31B
+cg12054453	TMEM49
+cg09249800	ACOT7;ACOT7;ACOT7;ACOT7
+cg08818207	TAP1 SeqId_12510_3 SeqId_3210_1
+cg07878065	
+cg02068052		
+cg03957124		
+cg27537252	B2M
+cg01409343	TMEM49
+cg13575798	SND1
+cg24741430	
+cg04176813	
+cg26140475	
+cg14496081		
+cg07830828  TRPC4AP;TRPC4AP
+
+```{r cars}
+
+
+da.methylome_pheno
+da.methylome_pheno_df <- as.data.frame(da.methylome_pheno)
+head(da.methylome_pheno_df)
+
+da.CpGs_INT
+da.CpGs_df <- as.data.frame(da.CpGs_INT)
+da.CpGs_df$id <- rownames(da.CpGs_df)
+View(da.CpGs_df)
+
+
+da.ratio_kt
+da.ratio_kt_df <- as.data.frame(da.ratio_kt)
+
+
+```
+
+
+1.Distribution of KTR in ARIC (scatter with eGFR/ color-coded by race)
+```{r pressure, echo=FALSE}
+
+plot_df <- da.ratio_kt_df %>%
+  inner_join(da.methylome_pheno_df, by = "id")
+head(plot_df)
+
+
+p <- ggplot(plot_df, aes(x = egfrcrcys_v5, y = ratio_kt_log , color = RACEGRP51)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +  # Add regression line
+  labs(
+    title = "Distribution of log(KTR) vs. eGFR in ARIC",
+    x = " Estimated GFR (eGFR) at Visit 5",
+    y = "log(Kynurenine / Tryptophan Ratio)",
+    color = "Race"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/logKTR_vs_egfr_scatter.png", plot = p, width = 8, height = 6, dpi = 300)
+
+```
+
+
+
+```{r}
+
+#extract CpGs as the outcome of interest
+ewas_reg_cpgs_int <- c(
+  "cg07839457", "cg11699125", "cg16411857", "cg21979287", "cg16936953",
+  "cg18942579", "cg01059398", "cg16306654", "cg09801824", "cg23387863",
+  "cg03425812", "cg12828896", "cg00490406", "cg10636246", "cg03753191",
+  "cg23904266", "cg12054453", "cg09249800", "cg08818207", "cg07878065",
+  "cg02068052", "cg03957124", "cg27537252", "cg01409343", "cg13575798",
+  "cg24741430", "cg04176813", "cg26140475", "cg14496081", "cg07830828", "id"
+)
+
+ewas_reg_cpgs <- da.CpGs_df[, ewas_reg_cpgs_int]
+View(ewas_reg_cpgs)
+
+
+#Extract outcomes of interest and covariates for the regression analysis
+ewas_reg_outcome <- da.methylome_pheno[,c("id","egfrcrcys_v5","GENDER51","CENTER","V5AGE51","RACEGRP51", "acr_v5", "SeqId_10574_10","SeqId_3485_28")]
+View(ewas_reg_outcome)
+
+ewas_merged <- merge(ewas_reg_outcome, ewas_reg_cpgs, by = "id")
+View(ewas_merged)
+
+incidents <- read_dta("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/inc_esrd_by20.dta")
+View(incidents)
+colnames(incidents)
+
+# Merge using a left join: keep all rows in ewas_merged
+ewas_merged <- merge(ewas_merged, incidents, by = "id", all.x = TRUE)
+
+#check how many incidental CKD after visit 5
+table(ewas_merged$inc_esrd50crcys_def1_v5) # 94 new cases
+table(ewas_merged$inc_esrd50_def1_v5)
+table(ewas_merged$inc_esrd50crcys_def1_v5)
+```
+
+Regression Analaysis for CpGs_INT (exposure) and outcomes (eGFRs, Log(uACR), ESRD) [WHITE ONLY]
+
+
+```{r}
+
+#### WHITE ##### CpG and ESRD
+cpg_int_vars <- c(
+  "cg07839457", "cg11699125", "cg16411857", "cg21979287", "cg16936953",
+  "cg18942579", "cg01059398", "cg16306654", "cg09801824", "cg23387863",
+  "cg03425812", "cg12828896", "cg00490406", "cg10636246", "cg03753191",
+  "cg23904266", "cg12054453", "cg09249800", "cg08818207", "cg07878065",
+  "cg02068052", "cg03957124", "cg27537252", "cg01409343", "cg13575798",
+  "cg24741430", "cg04176813", "cg26140475", "cg14496081", "cg07830828"
+)
+
+cox_results_list <- list()
+
+for (cpg in cpg_int_vars) {
+  W_reg <- as.formula(paste(
+    "Surv(fu_esrd50_def1_v1, inc_esrd50crcys_def1_v5) ~", 
+    cpg, "+ GENDER51 + V5AGE51 + CENTER"
+  ))
+  
+ # --- White only ---
+ 
+ white_model <- coxph(W_reg, data = subset(ewas_merged, RACEGRP51 == "W"))
+white_summary <- summary(white_model)
+  if (cpg %in% rownames(white_summary$coefficients)) {
+    coef_row <- white_summary$coefficients[cpg, ]
+    cox_results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["coef"],
+      HR = exp(coef_row["coef"]),
+      HR_CI_lower = exp(coef_row["coef"] - 1.96 * coef_row["se(coef)"]),
+      HR_CI_upper = exp(coef_row["coef"] + 1.96 * coef_row["se(coef)"]),
+      StdError = coef_row["se(coef)"],
+      zValue = coef_row["z"],
+      pValue = coef_row["Pr(>|z|)"]
+    )
+  }
+}
+
+cox_results_white <- do.call(rbind, cox_results_list)
+
+print(cox_results_white)
+
+```
+
+
+
+
+```{r}
+
+#CpGs and eGFR [WHITE ONLY]
+
+# Initialize a list to store results
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_int_vars) {
+  formula <- as.formula(paste("egfrcrcys_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+  white_model <- lm(formula, data = subset(ewas_merged,RACEGRP51=="W"))
+  model_summary <- summary(white_model)
+  
+if (cpg %in% rownames(model_summary$coefficients)) {
+    coef_row <- model_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  }
+}
+
+# Combine all into one data frame
+egfr_results <- do.call(rbind, results_list)
+
+# View the result
+print(egfr_results)
+
+
+```
+
+
+```{r}
+# CpGs and log (uACR)
+
+ewas_merged$log_acr_v5 <- log(ewas_merged$acr_v5)
+
+# Initialize results list
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_int_vars) {
+  # Create model formula
+  formula <- as.formula(paste("log_acr_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+  
+  # Fit model
+  uacr_model <- lm(formula, data = subset(ewas_merged,RACEGRP51=="W"))
+  
+  # Print model summary
+  cat("\n==========\nLinear regression for", cpg, "\n")
+  print(summary(uacr_model))
+  
+  # Extract model summary
+  uacr_summary <- summary(uacr_model)
+  
+  # Only proceed if CpG is in model
+  if (cpg %in% rownames(uacr_summary$coefficients)) {
+    coef_row <- uacr_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  } else {
+    warning(paste("CpG", cpg, "not found in model coefficients"))
+  }
+}
+
+# Combine into one data frame
+uacr_results <- do.call(rbind, results_list)
+
+# View results
+print(uacr_results)
+
+```
+
+Heatmap
+
+```{r}
+# Extract beta and p-value, renaming for merge
+
+egfr <- egfr_results[, c("CpG", "Beta", "pValue")]
+colnames(egfr)[2:3] <- c("eGFR", "p_eGFR")
+
+uacr <- uacr_results[, c("CpG", "Beta", "pValue")]
+colnames(uacr)[2:3] <- c("log_uACR", "p_uACR")
+
+esrd <- cox_results_white[, c("CpG", "Beta", "pValue")]
+colnames(esrd)[2:3] <- c("ESRD", "p_ESRD")
+
+merged <- Reduce(function(x, y) merge(x, y, by = "CpG"), list(egfr, uacr, esrd))
+# Melt beta values and p-values
+beta_long <- melt(merged[, c("CpG", "eGFR", "log_uACR", "ESRD")], id.vars = "CpG")
+pval_long <- melt(merged[, c("CpG", "p_eGFR", "p_uACR", "p_ESRD")], id.vars = "CpG")
+
+# Align p-values with beta
+pval_long$variable <- gsub("p_", "", pval_long$variable)
+
+# Merge beta and p-value data
+plot_df <- left_join(beta_long, pval_long, by = c("CpG", "variable"))
+colnames(plot_df) <- c("CpG", "Outcome", "Beta", "pValue")
+
+# Create significance marker
+plot_df$Signif <- ifelse(plot_df$pValue < 0.05, "*", "")
+
+
+heatmap <- ggplot(plot_df, aes(x = Outcome, y = CpG, fill = Beta)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Signif), size = 4, color = "black") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "CpG Associations with Kidney Outcomes (White Participants)",
+       x = "Outcome", y = "CpG Site", fill = "Beta") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/04 Plots/heatmap.png", 
+       plot = heatmap, width = 8, height = 6, dpi = 300)
+
+```
+
+
+```{r}
+# Inverse normal transform function
+invnorm_transform <- function(x) {
+  ranks <- rank(x, na.last = "keep")
+  n <- sum(!is.na(ranks))
+  qnorm((ranks - 0.5) / n)
+}
+
+# Apply to outcomes
+ewas_merged$egfr_INT <- invnorm_transform(ewas_merged$egfrcrcys_v5)
+ewas_merged$log_uacr_INT <- invnorm_transform(ewas_merged$log_acr_v5)
+ewas_merged$acr_INT <- invnorm_transform(ewas_merged$acr_v5)
+
+
+sum(is.na(ewas_merged$log_acr_v5))
+sum(is.na(ewas_merged$egfrcrcys_v5))
+```
+
+```{r}
+#CpGs and eGFR_INT [WHITE ONLY]
+
+# Initialize a list to store results
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_int_vars) {
+  formula_egfr_INT <- as.formula(paste("egfr_INT ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+  white_egfr_INT <- lm(formula_egfr_INT, data = subset(ewas_merged,RACEGRP51=="W"))
+  model_summary <- summary(white_egfr_INT)
+  
+if (cpg %in% rownames(model_summary$coefficients)) {
+    coef_row <- model_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  }
+}
+
+# Combine all into one data frame
+egfr_INT_results <- do.call(rbind, results_list)
+
+# View the result
+print(egfr_INT_results)
+
+```
+
+```{r}
+# CpGs and log (uACR)_INT
+
+
+# Initialize results list
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_int_vars) {
+  # Create model formula
+  formula_log_uacr_INT <- as.formula(paste("log_uacr_INT ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+  
+  # Fit model
+  log_uacr_INT_model <- lm(formula_log_uacr_INT, data = subset(ewas_merged,RACEGRP51=="W"))
+  
+  # Print model summary
+  cat("\n==========\nLinear regression for", cpg, "\n")
+  print(summary(log_uacr_INT_model))
+  
+  # Extract model summary
+  uacr_summary <- summary(log_uacr_INT_model)
+  
+  # Only proceed if CpG is in model
+  if (cpg %in% rownames(uacr_summary$coefficients)) {
+    coef_row <- uacr_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  } else {
+    warning(paste("CpG", cpg, "not found in model coefficients"))
+  }
+}
+
+# Combine into one data frame
+Log_uacr_INT_results <- do.call(rbind, results_list)
+
+# View results
+print(Log_uacr_INT_results)
+
+```
+
+```{r}
+# Extract beta and p-value, renaming for merge
+
+egfr <- egfr_INT_results[, c("CpG", "Beta", "pValue")]
+colnames(egfr)[2:3] <- c("eGFR", "p_eGFR")
+
+uacr <- Log_uacr_INT_results[, c("CpG", "Beta", "pValue")]
+colnames(uacr)[2:3] <- c("log_uACR", "p_uACR")
+
+esrd <- cox_results_white[, c("CpG", "Beta", "pValue")]
+colnames(esrd)[2:3] <- c("ESRD", "p_ESRD")
+
+merged <- Reduce(function(x, y) merge(x, y, by = "CpG"), list(egfr, uacr, esrd))
+# Melt beta values and p-values
+beta_long <- melt(merged[, c("CpG", "eGFR", "log_uACR", "ESRD")], id.vars = "CpG")
+pval_long <- melt(merged[, c("CpG", "p_eGFR", "p_uACR", "p_ESRD")], id.vars = "CpG")
+
+# Align p-values with beta
+pval_long$variable <- gsub("p_", "", pval_long$variable)
+
+# Merge beta and p-value data
+plot_df <- left_join(beta_long, pval_long, by = c("CpG", "variable"))
+colnames(plot_df) <- c("CpG", "Outcome", "Beta", "pValue")
+
+# Create significance marker
+plot_df$Signif <- ifelse(plot_df$pValue < 0.05, "*", "")
+
+
+heatmap <- ggplot(plot_df, aes(x = Outcome, y = CpG, fill = Beta)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Signif), size = 4, color = "black") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "CpG Associations with Kidney Outcomes (White Participants)",
+       x = "Outcome", y = "CpG Site", fill = "Beta") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/04 Plots/heatmap_2.png", 
+       plot = heatmap, width = 8, height = 6, dpi = 300)
+```
+
+
+```{r}
+# CpGs and log (uACR)
+
+# Initialize results list
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_int_vars) {
+  # Create model formula
+  formula_acr_INT <- as.formula(paste("acr_INT ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+  
+  # Fit model
+  uacr_INT_model <- lm(formula_acr_INT, data = subset(ewas_merged,RACEGRP51=="W"))
+  
+  # Print model summary
+  cat("\n==========\nLinear regression for", cpg, "\n")
+  print(summary(uacr_INT_model))
+  
+  # Extract model summary
+  uacr_summary <- summary(uacr_INT_model)
+  
+  # Only proceed if CpG is in model
+  if (cpg %in% rownames(uacr_summary$coefficients)) {
+    coef_row <- uacr_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  } else {
+    warning(paste("CpG", cpg, "not found in model coefficients"))
+  }
+}
+
+# Combine into one data frame
+uacr__INT_results <- do.call(rbind, results_list)
+
+# View results
+print(uacr_INT_results)
+```
+
+
+```{r}
+# Extract beta and p-value, renaming for merge
+
+egfr <- egfr_INT_results[, c("CpG", "Beta", "pValue")]
+colnames(egfr)[2:3] <- c("eGFR", "p_eGFR")
+
+uacr <- uacr_INT_results[, c("CpG", "Beta", "pValue")]
+colnames(uacr)[2:3] <- c("uACR", "p_uACR")
+
+esrd <- cox_results_white[, c("CpG", "Beta", "pValue")]
+colnames(esrd)[2:3] <- c("ESRD", "p_ESRD")
+
+merged <- Reduce(function(x, y) merge(x, y, by = "CpG"), list(egfr, uacr, esrd))
+# Melt beta values and p-values
+beta_long <- melt(merged[, c("CpG", "eGFR", "uACR", "ESRD")], id.vars = "CpG")
+pval_long <- melt(merged[, c("CpG", "p_eGFR", "p_uACR", "p_ESRD")], id.vars = "CpG")
+
+# Align p-values with beta
+pval_long$variable <- gsub("p_", "", pval_long$variable)
+
+# Merge beta and p-value data
+plot_df <- left_join(beta_long, pval_long, by = c("CpG", "variable"))
+colnames(plot_df) <- c("CpG", "Outcome", "Beta", "pValue")
+
+# Create significance marker
+plot_df$Signif <- ifelse(plot_df$pValue < 0.05, "*", "")
+
+plot_df$Outcome <- factor(plot_df$Outcome, levels = c("eGFR", "uACR", "ESRD"))
+heatmap <- ggplot(plot_df, aes(x = Outcome, y = CpG, fill = Beta)) +
+  geom_tile(color = "white") + 
+  geom_text(aes(label = Signif), size = 4, color = "black") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "CpG Associations with Kidney Outcomes (White Participants)",
+       x = "Outcome", y = "CpG Site", fill = "Beta") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/04 Plots/heatmap_3.png", 
+       plot = heatmap, width = 8, height = 6, dpi = 300)
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,405 @@
+---
+title: "Tryptophan EWAS Reg"
+output: html_document
+date: "2025-07-09"
+---
+
+```{r}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+```
+
+#extract relevant CPG from the EWAS result that is statistically significant: 
+cg21711214
+cg21084702
+cg17564074
+cg07839457
+cg12828896
+cg03425812
+
+#Among all statistically significant GPG sites - Identify nearby genes and its associated proteins
+cg21711214 - HPS4;HPS4 - no relevant protein
+cg21084702 - PSORS1C1;PSORS1C2 - no relevant protein
+cg17564074 - no relevant genes - no relevant protein
+cg07839457 - NLRC5- no relevant protein
+cg12828896 - NLRC5- no relevant protein
+cg03425812 - B2M- SeqId_10574_10 & SeqId_3485_28
+
+Check if there is any metabolites associates with these proteins. 
+
+
+#Read in the da.CpGs file and the da.methylome_pheno file
+```{r setup, include=FALSE}
+
+
+da.methylome_pheno
+View(da.methylome_pheno)
+colnames(da.methylome_pheno)
+
+da.CpGs
+rownames(da.CpGs)
+
+da.CpGs_temp <- as.data.frame(da.CpGs)
+da.CpGs_temp$id <- rownames(da.CpGs_temp)
+View(da.CpGs_temp)
+da.ratio_kt
+View(da.ratio_kt)
+da.ratio_kt_df <- as.data.frame(da.ratio_kt)
+
+```
+
+#Extract cpg sites that is significant from the EWAS analysis
+```{r}
+ewas_reg_cpgs <- da.CpGs_temp[, c("cg21711214", "cg21084702", "cg17564074", "cg07839457", "cg12828896", "cg03425812", "id")]
+View(ewas_reg_cpgs)
+
+cpg_vars <- setdiff(colnames(ewas_reg_cpgs), "id")
+
+#inverse normal transform the cpg value for analysis to avoid extreme beta coefficients
+ewas_reg_cpgs_int <- ewas_reg_cpgs
+for (cpg in cpg_vars) {
+  ranks <- rank(ewas_reg_cpgs[[cpg]], na.last = "keep") 
+  n <- sum(!is.na(ranks))
+  ewas_reg_cpgs_int[[cpg]] <- qnorm((ranks - 0.5) / n)
+}
+
+#Check and compare distribution of CPG before and after the inverse normal transformation
+summary(ewas_reg_cpgs_int[cpg_vars])
+par(mfrow = c(2, 3))
+for (cpg in cpg_vars) {
+  hist(ewas_reg_cpgs[[cpg]], main = paste(cpg, "Original"), xlab = "", col = "lightblue")
+  hist(ewas_reg_cpgs_int[[cpg]], main = paste(cpg, "INT"), xlab = "", col = "lightgreen")
+}
+
+View(ewas_reg_cpgs_int)
+
+#Extract outcomes of interest and covariates for the regression analysis
+ewas_reg_outcome <- da.methylome_pheno[,c("id","egfrcrcys_v5","GENDER51","CENTER","V5AGE51","RACEGRP51", "acr_v5", "SeqId_10574_10","SeqId_3485_28")]
+View(ewas_reg_outcome)
+
+ewas_merged <- merge(ewas_reg_outcome, ewas_reg_cpgs_int, by = "id")
+View(ewas_merged)
+
+incidents <- read_dta("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/inc_esrd_by20.dta")
+View(incidents)
+colnames(incidents)
+
+# Merge using a left join: keep all rows in ewas_merged
+ewas_merged <- merge(ewas_merged, incidents, by = "id", all.x = TRUE)
+
+#check how many incidental CKD after visit 5
+table(ewas_merged$inc_esrd50crcys_def1_v5) # 94 new cases
+table(ewas_merged$inc_esrd50_def1_v5)
+table(ewas_merged$inc_esrd50crcys_def1_v5)
+
+```
+
+#Regression analysis
+
+#CpGs and Incidental CKD
+```{r pressure, echo=FALSE}
+
+
+cpg_int_vars <- c("cg21711214", "cg21084702", "cg17564074", 
+                  "cg07839457", "cg12828896", "cg03425812")
+
+
+# Initialize list to store results
+cox_results_list <- list()
+
+# Loop through each CpG and run Cox model
+for (cpg in cpg_int_vars) {
+  formula <- as.formula(paste("Surv(fu_esrd50_def1_v1, inc_esrd50crcys_def1_v5) ~", 
+                              cpg, "+ V5AGE51 + GENDER51 + CENTER + RACEGRP51"))
+  
+  model <- coxph(formula, data = ewas_merged)  # use your merged dataset with time and event
+  
+  summary_model <- summary(model)
+  
+  if (cpg %in% rownames(summary_model$coefficients)) {
+    coef_row <- summary_model$coefficients[cpg, ]
+    
+    cox_results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["coef"],
+      HR = exp(coef_row["coef"]),
+      HR_CI_lower = exp(coef_row["coef"] - 1.96 * coef_row["se(coef)"]),
+      HR_CI_upper = exp(coef_row["coef"] + 1.96 * coef_row["se(coef)"]),
+      StdError = coef_row["se(coef)"],
+      zValue = coef_row["z"],
+      pValue = coef_row["Pr(>|z|)"]
+    )
+  }
+}
+
+# Combine into a results data frame
+cox_cpg_results <- do.call(rbind, cox_results_list)
+
+# View results
+print(cox_cpg_results)
+
+## Conduct model check to ensure the loop captures the correct coefficients
+model_check <- coxph(Surv(fu_esrd50_def1_v1, inc_esrd50crcys_def1_v5) ~ cg21711214 + V5AGE51 + GENDER51 + CENTER + RACEGRP51, data=ewas_merged) 
+summary(model_check) #Confirmed the coefficients, SE and P value were captured correctly.
+
+
+
+```
+
+## CpGs and Incidental CKD - overall, stratified by race.
+```{r}
+library(survival)
+
+cpg_int_vars <- c("cg21711214", "cg21084702", "cg17564074", 
+                  "cg07839457", "cg12828896", "cg03425812")
+
+# Initialize list to store all results
+cox_results_list <- list()
+
+# Loop over CpGs and run Cox models for each stratum
+for (cpg in cpg_int_vars) {
+  # Define formula
+  formula_str <- paste("Surv(fu_esrd50_def1_v1, inc_esrd50crcys_def1_v5) ~", 
+                       cpg, "+ V5AGE51 + GENDER51 + CENTER")
+  formula <- as.formula(formula_str)
+
+  # --- Overall model ---
+  overall_model <- coxph(update(formula, . ~ . + RACEGRP51), data = ewas_merged)
+  overall_summary <- summary(overall_model)
+  if (cpg %in% rownames(overall_summary$coefficients)) {
+    coef_row <- overall_summary$coefficients[cpg, ]
+    cox_results_list[[paste0(cpg, "_overall")]] <- data.frame(
+      CpG = cpg,
+      Strata = "Overall",
+      Beta = coef_row["coef"],
+      HR = exp(coef_row["coef"]),
+      HR_CI_lower = exp(coef_row["coef"] - 1.96 * coef_row["se(coef)"]),
+      HR_CI_upper = exp(coef_row["coef"] + 1.96 * coef_row["se(coef)"]),
+      StdError = coef_row["se(coef)"],
+      zValue = coef_row["z"],
+      pValue = coef_row["Pr(>|z|)"]
+    )
+  }
+
+  # --- White only ---
+  white_model <- coxph(formula, data = subset(ewas_merged, RACEGRP51 == "W"))
+  white_summary <- summary(white_model)
+  if (cpg %in% rownames(white_summary$coefficients)) {
+    coef_row <- white_summary$coefficients[cpg, ]
+    cox_results_list[[paste0(cpg, "_White")]] <- data.frame(
+      CpG = cpg,
+      Strata = "White",
+      Beta = coef_row["coef"],
+      HR = exp(coef_row["coef"]),
+      HR_CI_lower = exp(coef_row["coef"] - 1.96 * coef_row["se(coef)"]),
+      HR_CI_upper = exp(coef_row["coef"] + 1.96 * coef_row["se(coef)"]),
+      StdError = coef_row["se(coef)"],
+      zValue = coef_row["z"],
+      pValue = coef_row["Pr(>|z|)"]
+    )
+  }
+
+  # --- Black only ---
+  black_model <- coxph(formula, data = subset(ewas_merged, RACEGRP51 == "B"))
+  black_summary <- summary(black_model)
+  if (cpg %in% rownames(black_summary$coefficients)) {
+    coef_row <- black_summary$coefficients[cpg, ]
+    cox_results_list[[paste0(cpg, "_Black")]] <- data.frame(
+      CpG = cpg,
+      Strata = "Black",
+      Beta = coef_row["coef"],
+      HR = exp(coef_row["coef"]),
+      HR_CI_lower = exp(coef_row["coef"] - 1.96 * coef_row["se(coef)"]),
+      HR_CI_upper = exp(coef_row["coef"] + 1.96 * coef_row["se(coef)"]),
+      StdError = coef_row["se(coef)"],
+      zValue = coef_row["z"],
+      pValue = coef_row["Pr(>|z|)"]
+    )
+  }
+}
+
+# Combine all results into one data frame
+cox_cpg_results_all <- do.call(rbind, cox_results_list)
+
+# View the combined results
+print(cox_cpg_results_all)
+
+```
+
+
+## CPG and eGFR
+
+```{r pressure, echo=FALSE}
+
+# Initialize a list to store results
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_sites) {
+  formula <- as.formula(paste("egfrcrcys_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER + RACEGRP51"))
+  model <- lm(formula, data = ewas_merged)
+  model_summary <- summary(model)
+  
+  # Extract CpG row
+  coef_row <- model_summary$coefficients[cpg, ]
+  
+  # Store results in a data frame
+  results_list[[cpg]] <- data.frame(
+    CpG = cpg,
+    Beta = coef_row["Estimate"],
+    StdError = coef_row["Std. Error"],
+    tValue = coef_row["t value"],
+    pValue = coef_row["Pr(>|t|)"]
+  )
+}
+
+# Combine all into one data frame
+egfr_results <- do.call(rbind, results_list)
+
+# View the result
+print(egfr_results)
+
+
+```
+## CPG and eGFR - overall and stratified by race
+
+```{r}
+# Initialize list to store all results
+egfr_results_list <- list()
+
+# Loop through each CpG site
+for (cpg in cpg_sites) {
+  
+  # Define base formula
+  base_formula <- as.formula(paste("egfrcrcys_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+
+  ## --- Overall model (adjusted for race) ---
+  overall_model <- lm(update(base_formula, . ~ . + RACEGRP51), data = ewas_merged)
+  overall_summary <- summary(overall_model)
+  if (cpg %in% rownames(overall_summary$coefficients)) {
+    coef_row <- overall_summary$coefficients[cpg, ]
+    egfr_results_list[[paste0(cpg, "_Overall")]] <- data.frame(
+      CpG = cpg,
+      Strata = "Overall",
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  }
+
+  ## --- White only model ---
+  white_model <- lm(base_formula, data = subset(ewas_merged, RACEGRP51 == "W"))
+  white_summary <- summary(white_model)
+  if (cpg %in% rownames(white_summary$coefficients)) {
+    coef_row <- white_summary$coefficients[cpg, ]
+    egfr_results_list[[paste0(cpg, "_White")]] <- data.frame(
+      CpG = cpg,
+      Strata = "White",
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  }
+
+  ## --- Black only model ---
+  black_model <- lm(base_formula, data = subset(ewas_merged, RACEGRP51 == "B"))
+  black_summary <- summary(black_model)
+  if (cpg %in% rownames(black_summary$coefficients)) {
+    coef_row <- black_summary$coefficients[cpg, ]
+    egfr_results_list[[paste0(cpg, "_Black")]] <- data.frame(
+      CpG = cpg,
+      Strata = "Black",
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  }
+}
+
+# Combine all results into one data frame
+egfr_results_all <- do.call(rbind, egfr_results_list)
+
+# View results
+print(egfr_results_all)
+
+```
+
+#CpGs and log-transformed UACR
+```{r}
+
+
+ewas_merged$log_acr_v5 <- log(ewas_merged$acr_v5)
+
+# Initialize results list
+results_list <- list()
+
+# Loop through each CpG and run linear regression
+for (cpg in cpg_sites) {
+  # Create model formula
+  formula <- as.formula(paste("log_acr_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER + RACEGRP51"))
+  
+  # Fit model
+  uacr_model <- lm(formula, data = ewas_merged)
+  
+  # Print model summary
+  cat("\n==========\nLinear regression for", cpg, "\n")
+  print(summary(uacr_model))
+  
+  # Extract model summary
+  uacr_summary <- summary(uacr_model)
+  
+  # Only proceed if CpG is in model
+  if (cpg %in% rownames(uacr_summary$coefficients)) {
+    coef_row <- uacr_summary$coefficients[cpg, ]
+    
+    # Store results
+    results_list[[cpg]] <- data.frame(
+      CpG = cpg,
+      Beta = coef_row["Estimate"],
+      StdError = coef_row["Std. Error"],
+      tValue = coef_row["t value"],
+      pValue = coef_row["Pr(>|t|)"]
+    )
+  } else {
+    warning(paste("CpG", cpg, "not found in model coefficients"))
+  }
+}
+
+# Combine into one data frame
+uacr_results <- do.call(rbind, results_list)
+
+# View results
+print(uacr_results)
+
+```
+
+#CpGs and log-transformed UACR - Overall and stratified
+```{r}
+# Create log-transformed UACR
+ewas_merged$log_acr_v5 <- log(ewas_merged$acr_v5)
+
+# Initialize results list
+uacr_results_list <- list()
+
+# Loop through each CpG
+for (cpg in cpg_sites) {
+  # Base model formula without race
+  base_formula <- as.formula(paste("log_acr_v5 ~", cpg, "+ V5AGE51 + GENDER51 + CENTER"))
+
+  ## --- Overall (adjusted for race) ---
+  overa

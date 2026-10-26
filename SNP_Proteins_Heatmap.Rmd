@@ -1,0 +1,139 @@
+---
+title: "SNP_Proteins_Heatmap"
+author: "Yuning Liu"
+date: "2025-07-29"
+output: ''
+---
+
+```{r setup, include=FALSE}
+
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("pheatmap")
+library(pheatmap)
+#install.packages("reshape2")
+library(reshape2)
+
+
+```
+
+
+Read in pQTM dataset
+```{r cars}
+
+pQTM <- read_excel("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/CpG_kt_ratio_pQTM.xlsx")
+colnames(pQTM)
+
+# Count unique proteins
+n_proteins <- length(unique(pQTM$protein))
+print(unique(pQTM$CpG)) # there are 28 CpG in total, 2 CpGs do not indicate any association (either cis or trans) with protein
+
+# Count unique CpGs
+n_cpgs <- length(unique(pQTM$CpG))
+
+# Print the results
+cat("Number of unique proteins:", n_proteins, "\n")
+cat("Number of unique CpGs:", n_cpgs, "\n")
+
+
+```
+
+
+```{r pressure, echo=FALSE}
+
+# Get count of unique proteins associated with each CpG
+protein_count_per_cpg <- pQTM %>%
+  group_by(CpG) %>%
+  summarise(
+    n_proteins = n_distinct(protein),
+    proteins = paste(unique(protein), collapse = "; ")
+  ) %>%
+  arrange(desc(n_proteins))
+
+# View the result
+print(protein_count_per_cpg) #worth noting that cg07839457 associates with 34 different protein, including TDO2
+
+#save the results 
+write_xlsx(protein_count_per_cpg, "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/protein_count_per_cpg.xlsx")
+
+
+```
+
+
+```{r}
+# Load necessary package
+library(dplyr)
+
+# Define your directory path
+folder_path <- "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS"
+
+# Define your CpGs of interest
+cpgs_to_keep <- c(
+  "cg07839457", "cg11699125", "cg16411857", "cg21979287", "cg16936953",
+  "cg18942579", "cg01059398", "cg16306654", "cg09801824", "cg23387863",
+  "cg03425812", "cg12828896", "cg00490406", "cg10636246", "cg03753191",
+  "cg23904266", "cg12054453", "cg09249800", "cg08818207", "cg07878065",
+  "cg02068052", "cg03957124", "cg27537252", "cg01409343", "cg13575798",
+  "cg24741430", "cg04176813", "cg26140475", "cg14496081", "cg07830828"
+)
+
+# List and read _manhattan.txt files
+file_list <- list.files(path = folder_path, pattern = "_manhattan\\.txt$", full.names = TRUE)
+
+# Create named list of data frames
+all_results <- setNames(
+  lapply(file_list, read.table, header = TRUE, sep = "\t", stringsAsFactors = FALSE),
+  gsub("_manhattan\\.txt$", "", basename(file_list))
+)
+
+# Filter out CpGs that start with "inv" and keep only those in your list
+all_results_filtered <- all_results[
+  !grepl("^inv", names(all_results)) & names(all_results) %in% cpgs_to_keep
+]
+
+# Set genome-wide significance threshold
+sig_threshold <- 5e-8
+
+# Create summary table using SNPID column
+snp_summary <- lapply(names(all_results_filtered), function(cpg_id) {
+  df <- all_results_filtered[[cpg_id]]
+  sig_df <- df[df$P < sig_threshold, ]
+  
+  snp_string <- if ("SNPID" %in% names(sig_df)) paste(unique(sig_df$SNPID), collapse = "; ") else NA
+
+  data.frame(
+    CpG = cpg_id,
+    n_significant_SNPs = nrow(sig_df),
+    SNPIDs = snp_string
+  )
+}) %>% bind_rows()
+
+# View summary
+print(snp_summary)
+write_xlsx(snp_summary, "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/snp_summary.xlsx")
+
+
+```
+
+
+
+```{r}
+
+
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,181 @@
+---
+title: "Hierarchical_Clustering_heatmap"
+author: "Yuning Liu"
+date: "2025-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("pheatmap")
+library(pheatmap)
+#install.packages("reshape2")
+library(reshape2)
+
+```
+
+
+
+```{r cars}
+da.CpGs
+# Step 1: Your list of 30 CpGs
+cpg_list <- c("cg07839457", "cg11699125", "cg16411857", "cg21979287", "cg16936953",
+              "cg18942579", "cg01059398", "cg16306654", "cg09801824", "cg23387863",
+              "cg03425812", "cg12828896", "cg00490406", "cg10636246", "cg03753191",
+              "cg23904266", "cg12054453", "cg09249800", "cg08818207", "cg07878065",
+              "cg02068052", "cg03957124", "cg27537252", "cg01409343", "cg13575798",
+              "cg24741430", "cg04176813", "cg26140475", "cg14496081", "cg07830828")
+
+# Step 2: Filter to just those 30 CpGs
+da.CpG_30 <- da.CpGs[, colnames(da.CpGs) %in% cpg_list]
+da.CpG_30
+
+
+# Compute CpG-to-CpG correlation matrix
+cpg_cor <- cor(da.CpG_30, method = "spearman", use = "pairwise.complete.obs")
+
+library(ComplexHeatmap)
+library(circlize)
+
+png("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/cpg_correlation_heatmap.png", width = 2000, height = 2000, res = 300)
+Heatmap(
+  cpg_cor,
+  name = "Spearman R",
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_names = TRUE,
+  show_column_names = TRUE,
+  row_names_gp = gpar(fontsize = 10),
+  column_names_gp = gpar(fontsize = 10),
+  col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+  heatmap_legend_param = list(title = "Correlation")
+)
+
+dev.off()
+
+# Example from earlier:
+cpg_dist <- dist(cpg_cor)
+cpg_tree <- hclust(cpg_dist, method = "complete")
+cluster_labels <- cutree(cpg_tree, k = 3)  # This assigns 3 clusters
+
+Heatmap(cpg_cor,
+        name = "Spearman R",
+        col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+        row_split = cluster_labels,
+        column_split = cluster_labels,
+        cluster_rows = TRUE,
+        cluster_columns = TRUE,
+        row_names_gp = gpar(fontsize = 9),  
+        row_names_max_width = unit(11, "cm") 
+)
+
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+# Compute distance and clustering
+cpg_dist <- dist(cpg_cor)
+cpg_tree <- hclust(cpg_dist, method = "complete")
+cluster_labels_raw <- cutree(cpg_tree, k = 3)
+
+# Set desired cluster display order (e.g., show cluster 2 first)
+desired_order <- c(2, 1, 3)
+
+# Convert to factor with desired order
+cluster_labels <- factor(cluster_labels_raw, levels = desired_order)
+
+png("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/clustering_heatmap.png", width = 2000, height = 2000, res = 300)
+# Generate heatmap
+Heatmap(
+  cpg_cor,
+  name = "Spearman R",
+  col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+  row_split = cluster_labels,
+  column_split = cluster_labels,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  row_names_gp = gpar(fontsize = 10),
+  column_names_gp = gpar(fontsize = 10),
+  heatmap_legend_param = list(title = "Correlation")
+)
+dev.off()
+
+```
+
+```{r}
+
+
+
+# Compute distance and clustering
+cpg_dist <- dist(cpg_cor)
+cpg_tree <- hclust(cpg_dist, method = "complete")
+cluster_labels_raw <- cutree(cpg_tree, k = 3)
+
+# Set desired cluster display order (e.g., show cluster 2 first)
+desired_order <- c(2, 1, 3)
+cluster_labels <- factor(cluster_labels_raw, levels = desired_order)
+
+# Define cluster colors (choose as you'd like)
+cluster_colors <- c("1" = "#F5c26B",  # Yellow
+                    "2" = "#80bbdb",  # green
+                    "3" = "#e8bac8")  # red
+
+# Add row and column annotations
+row_ha <- rowAnnotation(
+  Cluster = as.character(cluster_labels),
+  col = list(Cluster = cluster_colors),
+  show_annotation_name = FALSE
+)
+
+col_ha <- HeatmapAnnotation(
+  Cluster = as.character(cluster_labels),
+  col = list(Cluster = cluster_colors),
+  show_annotation_name = FALSE
+)
+
+# Save heatmap with annotations
+png("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/clustering_heatmap_annotated.png",
+    width = 4000, height = 4000, res = 600)
+
+Heatmap(
+  cpg_cor,
+  name = "Spearman R",
+  col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+  row_split = cluster_labels,
+  column_split = cluster_labels,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  left_annotation = row_ha,
+  top_annotation = col_ha,
+  row_names_gp = gpar(fontsize = 10),
+  column_names_gp = gpar(fontsize = 10),
+  heatmap_legend_param = list(title = "Correlation")
+)
+
+dev.off()
+
+                  
+
+```
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,113 @@
+---
+title: "KTR_Replication_Plot"
+author: "Yuning Liu"
+date: "2025-07-22"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+
+
+
+```
+
+
+##Load dataset about White and Black Participants
+```{r cars}
+
+ktr_white <- readRDS("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/ratio_kt_W.rds")
+ktr_black <- readRDS("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/ratio_kt_B.rds")
+
+View(ktr_white)
+View(ktr_black)
+
+# Rename columns to avoid conflicts
+ktr_white <- ktr_white %>% rename (beta_white=beta, se_white = se)
+ktr_black <- ktr_black %>% rename (beta_black=beta, se_black=se)
+
+# Merge by CpG identifier
+merged_ktr <- merge(ktr_white[, c("cpg", "beta_white","se_white")],
+                    ktr_black[, c("cpg", "beta_black","se_black")],
+                    by = "cpg")
+merged_ktr <- merged_ktr %>% mutate(z_white = beta_white/se_white,
+                                    z_black = beta_black/se_black)
+
+View(merged_ktr)
+
+cpg_list <- c(
+  "cg07839457", "cg11699125", "cg16411857", "cg21979287", "cg16936953",
+  "cg18942579", "cg01059398", "cg16306654", "cg09801824", "cg23387863",
+  "cg03425812", "cg12828896", "cg00490406", "cg10636246", "cg03753191",
+  "cg23904266", "cg12054453", "cg09249800", "cg08818207", "cg07878065",
+  "cg02068052", "cg03957124", "cg27537252", "cg01409343", "cg13575798",
+  "cg24741430", "cg04176813", "cg26140475", "cg14496081", "cg07830828"
+)
+
+subset_df <- merged_ktr[merged_ktr$cpg %in% cpg_list, ]
+
+#View(subset_df)
+range(merged_ktr$beta_white)
+range(merged_ktr$beta_black)
+
+```
+
+## Including Plots of 30 CpGs
+
+
+```{r pressure, echo=FALSE}
+
+rep1 <- ggplot(subset_df, aes(x = beta_white, y = beta_black)) +
+  geom_point(color = "darkred", size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  scale_x_continuous(limits = c(-1, 1)) +
+  scale_y_continuous(limits = c(-1, 1)) +
+  labs(
+    x = "EWAS Effect Estimate (White participants)",
+    y = "EWAS Effect Estimate (Black participants)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+rep1
+
+
+ggsave(
+  "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/04 Plots/KTR_30cpt_plot.png",
+  plot = rep1,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+
+```
+
+#### Calculate the pearson coefficient of the 30 cpgs 
+
+
+```{r}
+
+
+correlation <- cor(subset_df$beta_white, subset_df$beta_black, method = "pearson")
+print(correlation)
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

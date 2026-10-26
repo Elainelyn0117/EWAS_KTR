@@ -1,0 +1,398 @@
+---
+title: "Manhattan Plot_CpGs_SNPs"
+author: "Yuning Liu"
+date: "2025-07-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("stringr")
+require(stringr)
+#install.packages("qqman")
+library(qqman)
+#install.packages("ggrepel")
+require(ggrepel)
+```
+##########----------Manhattan plot of EWAS of KTR ----------##########
+
+```{r}
+
+KTR_white <- readRDS("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/ratio_kt_W.rds")
+
+ktr_sig <- KTR_white[KTR_white$P < 0.01, ]
+
+ktr_sig_qqman <- ktr_sig %>%
+  rename(
+    CHR = chr,
+    BP = pos,   # or use `position` if that’s the correct one
+    SNP = cpg
+  ) %>%
+  mutate(CHR = as.numeric(as.character(CHR)))
+
+png("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/Manhattan Plot of CpGs from EWAS.png", 
+    width = 8, height = 6, units = "in", res = 300)
+manhattan(ktr_sig_qqman,
+          genomewideline = -log10(5.9e-8),
+          suggestiveline = FALSE
+        )
+
+
+
+
+```
+
+
+
+##########----------Manhattan Plot of 30 CpG in the EWAS----------########## 
+
+```{r}
+
+KTR_white <- readRDS("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/EWAS_tk_ratio/ratio_kt_W.rds")
+
+View(KTR_white)
+
+ordered_cpgs <- c(
+  "cg01409343", "cg18942579", "cg16936953", "cg12054453", "cg00490406",
+  "cg01059398", "cg21979287", "cg08818207", "cg27537252", "cg03425812",
+  "cg12828896", "cg03957124", "cg16306654", "cg03753191", "cg07878065", 
+  "cg04176813", "cg07839457", "cg16411857", "cg23387863", "cg23904266", 
+  "cg09249800", "cg11699125", "cg14496081", "cg07830828", "cg02068052", 
+  "cg24741430","cg10636246",  "cg13575798", "cg26140475", "cg09801824"
+)
+
+ktr_filtered <- KTR_white[KTR_white$cpg %in% ordered_cpgs, ]
+ktr_filtered <- ktr_filtered[match(ordered_cpgs, ktr_filtered$cpg), ]
+
+str(ktr_filtered)
+ktr_filtered$chr <- as.numeric(as.character(ktr_filtered$chr))
+
+```
+
+
+```{r}
+# Manhattan-style plot
+ggplot(ktr_filtered, aes(x = chr, y = logp, color = cluster)) +
+  geom_point(size = 3) +
+  geom_text_repel(aes(label = cpg), size = 3, max.overlaps = Inf, box.padding = 0.5) +
+  scale_color_manual(values = c("Cluster 1" = "blue", "Cluster 2" = "darkorange", "Cluster 3" = "darkgreen")) +
+  labs(
+    title = "Manhattan Plot of Top 30 CpGs",
+    x = "Chromosome",
+    y = "-log10(p-value)",
+    color = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+```
+
+
+######### ------ Manhattan Plot of GWAS results -----------###########
+## Read in the files 
+
+```{r cars}
+# Set your directory path
+folder_path <- "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS"  # change this to folder path
+
+# List only files ending in _manhattan.txt
+file_list <- list.files(path = folder_path,
+                        pattern = "_manhattan\\.txt$", 
+                        full.names = TRUE)
+
+# Read each file into a list of data frames
+all_results <- lapply(file_list, read.table, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+
+names(all_results) <- gsub("_manhattan\\.txt$", "", basename(file_list))
+list.files(path = folder_path, pattern = "_manhattan\\.txt$") #confirm all files ending in manhattan has been picked up.
+
+names(all_results)
+```
+#Example Manhanttan plot using one CpG as example
+
+```{r pressure, echo=FALSE}
+
+cg00490406_Manhanttan <- all_results[["cg00490406"]]
+View(cg00490406_Manhanttan)
+
+
+cg00490406_clean <- cg00490406_Manhanttan %>%
+  dplyr::filter(str_length(non_coded_allele) == 1 & str_length(coded_allele) == 1)
+
+View(cg00490406_clean)
+manhattan(cg00490406_clean,
+          chr = "Chr",     # if your column is actually named "Chr"
+          bp = "Position",
+          snp = "SNPID",
+          p = "P",
+          main = "Manhattan Plot: cg00490406",
+          genomewideline = -log10(5e-8),
+          suggestiveline = -log10(1e-5),
+          ylim = c(0, -log10(min(cg00490406_clean$P, na.rm = TRUE)) + 2))
+
+# Red line is Genome-Wide Significance Threshold
+# Blue line is suggestive signifcance threshold
+
+```
+
+
+# Map RsID with SNP ID 
+
+```{r}
+
+# Read in file safely using read.delim
+snp_rs_map <- read.table("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS/allchr_rsids.txt",
+                         header = TRUE, sep = "", stringsAsFactors = FALSE, fill = TRUE)
+
+View(snp_rs_map)
+
+
+#Merge RsID in all CpG results using SNPID
+
+all_results_mapped <- lapply(all_results, function(df) {
+  df_merged <- merge(df, snp_rs_map, by = "SNPID", all.x = TRUE)
+  return(df_merged)
+})
+
+# Keep the same names
+names(all_results_mapped) <- names(all_results)
+head(all_results_mapped[["cg00490406"]]) # all good 
+
+```
+
+
+
+#Create a loop
+
+```{r}
+
+
+# create a folder to save plots
+output_dir <- "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS/plots"
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir)
+}
+
+# Loop through each CpG result
+for (trait_name in names(all_results)) {
+  
+  df <- all_results[[trait_name]]
+  
+  # Step 1: Filter out indels (non-single letter alleles)
+  df_clean <- df %>%
+    filter(str_length(non_coded_allele) == 1 & str_length(coded_allele) == 1)
+  
+  # Step 2: Handle case where no valid SNPs remain
+  if (nrow(df_clean) == 0) {
+    warning(paste("Skipping", trait_name, "- no valid SNPs after indel removal"))
+    next
+  }
+  
+  # Step 3: Plot and save
+  output_file <- file.path(output_dir, paste0(trait_name, "_manhattan_plot.png"))
+  
+  png(output_file, width = 1000, height = 600)
+  manhattan(df_clean,
+            chr = "Chr", 
+            bp = "Position", 
+            snp = "SNPID", 
+            p = "P",
+            main = paste("Manhattan Plot:", trait_name),
+            genomewideline = -log10(5e-8),
+            suggestiveline = -log10(1e-5),
+            ylim = c(0, -log10(min(df_clean$P, na.rm = TRUE)) + 2))
+  dev.off()
+  
+  cat(paste("Saved plot for", trait_name, "\n"))
+}
+
+```
+
+#Create the Manhattan plot 
+
+cg03425812
+cg10636246
+cg01059398
+cg03753191
+cg07839457
+cg12828896
+
+```{r}
+hit_cpgs <- c("cg00490406", "cg01409343", "cg07878065", "cg12054453", 
+              "cg13575798", "cg16936953", "cg18942579", "cg24741430",
+              "cg03425812","cg10636246","cg01059398","cg03753191","cg07839457",
+              "cg12828896")
+
+# Combine cleaned data from only the 14 CpGs
+combined_hits_df <- bind_rows(
+  lapply(hit_cpgs, function(cpg) {
+    df <- all_results_mapped[[cpg]]
+    df %>%
+      filter(nchar(non_coded_allele) == 1 & nchar(coded_allele) == 1) %>%
+      mutate(CpG = cpg)
+  })
+)
+
+# Make sure chromosome and position are numeric
+combined_hits_df <- combined_hits_df %>%
+  mutate(Chr = as.numeric(as.character(Chr)),
+         Position = as.numeric(as.character(Position))) %>%
+  arrange(Chr, Position)
+
+# Create cumulative base pair position for Manhattan layout
+combined_hits_df <- combined_hits_df %>%
+  group_by(Chr) %>%
+  mutate(BP_cum = Position + min(Position, na.rm = TRUE)) %>%
+  ungroup()
+
+# Axis labels for chromosomes
+axis_df <- combined_hits_df %>%
+  group_by(Chr) %>%
+  summarize(center = mean(BP_cum, na.rm = TRUE))
+
+sig_hits <- combined_hits_df %>%
+  filter(P < 5e-8 & !is.na(rsid))
+
+combined_manhattan <- ggplot(combined_hits_df, aes(x = BP_cum, y = -log10(P), color = CpG)) +
+  geom_point(alpha = 0.7, size = 1) +
+  geom_text_repel(data = sig_hits, aes(label = rsid), size = 2.5, max.overlaps = 15) +
+  scale_x_continuous(label = axis_df$Chr, breaks = axis_df$center) +
+  geom_hline(yintercept = -log10(5e-8), color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -log10(1e-5), color = "blue", linetype = "dashed") +
+  labs(title = "Combined Manhattan Plot of Top 14 CpGs",
+       x = "Chromosome",
+       y = expression(-log[10](P))) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS/Manhattan Plot of Top 14 CpGs.png", plot = combined_manhattan, width = 8, height = 6, dpi = 300)
+
+```
+
+
+```{r}
+# Combine cleaned data from these CpGs
+combined_hits_df <- bind_rows(
+  lapply(hit_cpgs, function(cpg) {
+    df <- all_results_mapped[[cpg]]
+    df %>%
+      filter(nchar(non_coded_allele) == 1 & nchar(coded_allele) == 1) %>%
+      mutate(CpG = cpg)
+  })
+)
+
+# Convert to numeric and sort
+combined_hits_df <- combined_hits_df %>%
+  mutate(Chr = as.numeric(as.character(Chr)),
+         Position = as.numeric(as.character(Position))) %>%
+  arrange(Chr, Position)
+
+# STEP 1: Calculate cumulative position using chromosome offsets
+chromosome_offsets <- combined_hits_df %>%
+  group_by(Chr) %>%
+  summarize(chr_len = max(Position, na.rm = TRUE)) %>%
+  arrange(Chr) %>%
+  mutate(offset = lag(cumsum(chr_len), default = 0)) %>%
+  select(Chr, offset)
+
+# Merge offset and compute cumulative position
+combined_hits_df <- combined_hits_df %>%
+  left_join(chromosome_offsets, by = "Chr") %>%
+  mutate(BP_cum = Position + offset)
+
+# STEP 2: Set axis labels per chromosome center
+axis_df <- combined_hits_df %>%
+  group_by(Chr) %>%
+  summarize(center = mean(BP_cum, na.rm = TRUE))
+
+# STEP 3: Significant hits for labeling (with rsid)
+sig_hits <- combined_hits_df %>%
+  filter(P < 5e-8 & !is.na(rsid))
+
+# STEP 4: Final plot
+combined_manhattan <- ggplot(combined_hits_df, aes(x = BP_cum, y = -log10(P), color = CpG)) +
+  geom_point(alpha = 0.7, size = 1) +
+ geom_text_repel(data = sig_hits, aes(label = CpG), size = 3, max.overlaps = 15) +
+  scale_x_continuous(
+    breaks = axis_df$center,
+    labels = axis_df$Chr,
+    expand = c(0.01, 0)
+  ) +
+  geom_hline(yintercept = -log10(5e-8), color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -log10(1e-5), color = "blue", linetype = "dashed") +
+  labs(
+    title = "Combined Manhattan Plot of Top 14 CpGs",
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 0, size = 10, vjust = 0.5)
+  )
+
+# Save the plot
+ggsave(
+  "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS/Manhattan Plot of Top 14 CpGs.png",
+  plot = combined_manhattan,
+  width = 10,
+  height = 6,
+  dpi = 300
+)
+
+
+
+```
+
+
+```{r}
+
+# Filter for top SNP per CpG with genome-wide significance
+sig_hits_top <- combined_hits_df %>%
+  filter(P < 5e-8 & !is.na(CpG)) %>%
+  group_by(CpG) %>%
+  slice_min(order_by = P, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# Manhattan plot with CpG labels (one per CpG)
+combined_manhattan_2 <- ggplot(combined_hits_df, aes(x = BP_cum, y = -log10(P), color = CpG)) +
+  geom_point(alpha = 0.7, size = 1) +
+  geom_text_repel(data = sig_hits_top, aes(label = CpG), size = 3, max.overlaps = Inf) +
+  scale_x_continuous(
+    breaks = axis_df$center,
+    labels = axis_df$Chr,
+    expand = c(0.01, 0)
+  ) +
+  geom_hline(yintercept = -log10(5e-8), color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -log10(1e-5), color = "blue", linetype = "dashed") +
+  labs(
+    title = "Combined Manhattan Plot of Top 14 CpGs",
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 0, size = 10, vjust = 0.5)
+  )
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/GWAS/Manhattan Plot Top 14 CpGs - Single Label Each.png",
+       plot = combined_manhattan_2, width = 8, height = 6, dpi = 300)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

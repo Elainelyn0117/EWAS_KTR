@@ -1,0 +1,135 @@
+---
+title: "KTR_Protein_PosNeg"
+author: "Yuning Liu"
+date: "2025-09-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+```
+
+
+
+```{r cars}
+cisprotein <- read_excel("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/05 Protein/cis_trans_CpG_protein.xlsx", sheet = "cis")
+transprotein <- read_excel("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/05 Protein/cis_trans_CpG_protein.xlsx", sheet = "trans")
+
+str(cisprotein)
+str(transprotein)
+```
+
+
+```{r pressure, echo=FALSE}
+allproteins <- bind_rows(cisprotein, transprotein)
+```
+
+
+```{r}
+# Step 3: define your 30 CpGs and cluster mapping
+cluster1 <- c("cg01409343","cg18942579","cg16936953","cg12054453","cg00490406",
+              "cg01059398","cg21979287","cg08818207","cg27537252","cg03425812",
+              "cg12828896","cg03957124","cg16306654","cg03753191","cg07878065",
+              "cg04176813","cg07839457","cg16411857")
+
+cluster2 <- c("cg23387863","cg23904266","cg09249800","cg11699125","cg14496081",
+              "cg07830828","cg02068052")
+
+cluster3 <- c("cg24741430","cg10636246","cg13575798","cg26140475","cg09801824")
+
+cpg_clusters <- data.frame(
+  CpG = c(cluster1, cluster2, cluster3),
+  cluster = c(rep(1, length(cluster1)), 
+              rep(2, length(cluster2)), 
+              rep(3, length(cluster3)))
+
+)
+
+
+KTR_proteins <- allproteins %>% 
+  filter(pQTM %in% cpg_clusters$CpG) %>%
+  left_join(cpg_clusters, by = c("pQTM" = "CpG"))
+
+KTR_proteins <- KTR_proteins %>%
+  mutate(direction = ifelse(beta > 0, "positive", "negative"))
+
+KTR_proteins_ordered <- KTR_proteins %>%
+  arrange(cluster, pQTM, direction)
+
+pos_proteins <- KTR_proteins_ordered %>%
+  filter(direction == "positive") %>%
+  select(pQTM, cluster, SYMBOL, SeqID, beta)
+
+neg_proteins <- KTR_proteins_ordered %>%
+  filter(direction == "negative") %>%
+  select(pQTM, cluster, SYMBOL, SeqID, beta)
+
+```
+
+#Save as cvs
+```{r}
+write.csv(pos_proteins,"R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/05 Protein/positive_protein_cpg.csv", row.names = FALSE)
+write.csv(neg_proteins,"R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/05 Protein/negative_protein_cpg.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+# CpG cluster mapping
+cluster1 <- c("cg01409343","cg18942579","cg16936953","cg12054453","cg00490406",
+              "cg01059398","cg21979287","cg08818207","cg27537252","cg03425812",
+              "cg12828896","cg03957124","cg16306654","cg03753191","cg07878065",
+              "cg04176813","cg07839457","cg16411857")
+
+cluster2 <- c("cg23387863","cg23904266","cg09249800","cg11699125","cg14496081",
+              "cg07830828","cg02068052")
+
+cluster3 <- c("cg24741430","cg10636246","cg13575798","cg26140475","cg09801824")
+
+cpg_clusters <- data.frame(
+  CpG = c(cluster1, cluster2, cluster3),
+  cluster = c(rep(1, length(cluster1)), 
+              rep(2, length(cluster2)), 
+              rep(3, length(cluster3)))
+)
+
+cpg_order <- c(cluster1, cluster2, cluster3)
+
+# Helper to collapse labels
+collapse_labels <- function(x) {
+  x <- unique(na.omit(x))
+  if (length(x) == 0) "" else paste(x, collapse = "; ")
+}
+
+# ---- POSITIVE ----
+pos_wide <- pos_proteins %>%
+  mutate(protein_display = ifelse(!is.na(SYMBOL) & SYMBOL != "", SYMBOL, seqID)) %>%
+  group_by(pQTM) %>%
+  summarize(positive_proteins = collapse_labels(protein_display), .groups = "drop")
+
+# ---- NEGATIVE ----
+neg_wide <- neg_proteins %>%
+  mutate(protein_display = ifelse(!is.na(SYMBOL) & SYMBOL != "", SYMBOL, seqID)) %>%
+  group_by(pQTM) %>%
+  summarize(negative_proteins = collapse_labels(protein_display), .groups = "drop")
+
+# ---- MERGE + ORDER ----
+collapsed <- full_join(pos_wide, neg_wide, by = "pQTM") %>%
+  left_join(cpg_clusters, by = c("pQTM" = "CpG")) %>%
+  mutate(
+    pQTM = factor(pQTM, levels = cpg_order),
+    positive_proteins = replace_na(positive_proteins, ""),
+    negative_proteins = replace_na(negative_proteins, "")
+  ) %>%
+  arrange(cluster, pQTM) %>%
+  rename(CpG = pQTM, cluster_id = cluster)
+
+# View result
+head(collapsed)
+
+write.csv(collapsed,"R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/05 Protein/collapsed_protein_cpg.csv", row.names = FALSE)
+```
+

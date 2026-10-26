@@ -1,0 +1,204 @@
+---
+title: "KTR_Scatter Plots"
+author: "Yuning Liu"
+date: "2025-07-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(haven)     # for reading .dta files
+library(readxl)    # for reading Excel files
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)     # for data manipulation
+#install.packages("writexl")
+library(writexl)
+#install.packages ("tidyr")
+library(tidyr)
+#install.packages ("ggplot2")
+library(ggplot2)
+library(readr)
+library(survival)
+#install.packages("pheatmap")
+library(pheatmap)
+#install.packages("reshape2")
+library(reshape2)
+```
+
+
+#Load the dataframe
+```{r cars}
+da.methylome_pheno
+da.methylome_pheno_df <- as.data.frame(da.methylome_pheno)
+head(da.methylome_pheno_df)
+
+da.CpGs_INT
+da.CpGs_df <- as.data.frame(da.CpGs_INT)
+da.CpGs_df$id <- rownames(da.CpGs_df)
+
+
+da.ratio_kt
+da.ratio_kt_df <- as.data.frame(da.ratio_kt)
+View(da.ratio_kt_df)
+```
+
+
+#Scatterplots of EGFR and log (KTR)
+```{r pressure, echo=FALSE}
+
+plot_df <- da.ratio_kt_df %>%
+  inner_join(da.methylome_pheno_df, by = "id")
+head(plot_df)
+
+
+p <- ggplot(plot_df, aes(x = egfrcrcys_v5, y = ratio_kt_log , color = RACEGRP51)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_smooth(aes(group = 1), method = "lm", color = "black", se = FALSE) +
+  labs(
+    title = "Distribution of log(KTR) vs. eGFR",
+    x = " Estimated GFR (eGFR)",
+    y = "log(Kynurenine-to-Tryptophan Ratio)",
+    color = "Race"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/logKTR_vs_eGFR.png", plot = p, width = 8, height = 6, dpi = 300)
+
+
+
+plot_df <- da.ratio_kt_df %>%
+  inner_join(da.methylome_pheno_df, by = "id")
+head(plot_df)
+
+
+p2 <- ggplot(plot_df, aes(x = egfrcrcys_v5, y = ratio_kt_log, color = RACEGRP51)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +  # race-specific lines only
+  labs(
+    title = "Distribution of log(KTR) vs. eGFR at Visit 5",
+    x = "Estimated GFR (eGFR)",
+    y = "log(Kynurenine-to-Tryptophan Ratio)",
+    color = "Race"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave(
+  "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/logKTR_vs_eGFR_by_race.png", 
+  plot = p2, 
+  width = 8, 
+  height = 6, 
+  dpi = 300
+)
+
+
+```
+
+
+
+```{r}
+
+cor.test(plot_df$egfrcrcys_v5, plot_df$ratio_kt_log, method = "spearman")
+
+
+
+
+```
+
+Scatterplots of log (uACR) and log (eGFR)
+```{r}
+#uacr = acr_v5 in da.methylome_pheno
+# KTR = ratio_kt_log in da.ratio_kt_df
+###### plot with overall line and race specific line#######################
+# Step 1: Add log uACR to methylome_pheno
+da.methylome_pheno <- da.methylome_pheno %>%
+  mutate(log_uacr = log(acr_v5))
+
+# Step 2: Merge dataframes (assuming they have a common ID column, e.g., 'ID')
+merged_df <- da.methylome_pheno %>%
+  select(id, log_uacr,acr_v5,RACEGRP51) %>%
+  inner_join(da.ratio_kt_df %>% select(id, ratio_kt_log), by = "id")
+
+# Step 3: Scatter plot
+sp <- ggplot(merged_df, aes(x = log_uacr, y = ratio_kt_log, color = as.factor(RACEGRP51))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+   geom_smooth(aes(group = 1), method = "lm", color = "black", se = FALSE) +
+  labs(
+    title = "Distribution of log(uACR) vs log(KTR)",
+    x = "log(Urinary albumin-to-creatinine ratio)",
+    y = "log(Kynurenine-to-Tryptophan Ratio)",
+    color = "Race Group"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust=0.5) )
+
+ggsave("R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/logKTR_vs_loguacr_scatter.png", plot = sp, width = 8, height = 6, dpi = 300)
+
+
+################plot with race specific line only########################
+sp2 <- ggplot(merged_df, aes(x = log_uacr, y = ratio_kt_log, color = as.factor(RACEGRP51))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +  # race-specific lines only
+  labs(
+    title = "Distribution of log(uACR) vs log(KTR) at Visit 5",
+    x = "log(Urinary albumin-to-creatinine ratio)",
+    y = "log(Kynurenine-to-Tryptophan Ratio)",
+    color = "Race Group"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right",plot.title = element_text(hjust=0.5))
+
+ggsave(
+  "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/logKTR_vs_loguacr_by race.png", 
+  plot = sp2, 
+  width = 8, 
+  height = 6, 
+  dpi = 300
+)
+
+```
+
+
+## correlation coefficients of eGFR and ratio_kt_log as well as log_uacr and ratio_kt_log. 
+```{r}
+
+cor.test(merged_df$log_uacr, merged_df$ratio_kt_log, method = "pearson")
+cor.test(plot_df$egfrcrcys_v5, plot_df$ratio_kt_log, method = "pearson")
+
+
+cor.test(merged_df$log_uacr, merged_df$ratio_kt_log, method = "spearman")
+cor.test(plot_df$egfrcrcys_v5, plot_df$ratio_kt_log, method = "spearman")
+
+```
+
+
+```{r}
+library(ggpubr)
+
+combined_plot <- ggarrange(
+  sp + theme(legend.position = "none"),  # hide duplicate legend in first plot
+  p,                                     # let second plot retain the legend
+  ncol = 2,                 
+  common.legend = TRUE,                  # use a single shared legend
+  legend = "bottom",                     # place the legend at the bottom
+  align = "hv",                          # align panels horizontally and vertically
+  widths = c(1, 1))
+
+
+print(combined_plot)
+
+ggsave(
+  "R:/ARIC/Users/yl13544/02_EWAS_Tryptophan/01 Result/scatterplot_by race.png",
+  plot = combined_plot,
+  width = 14,
+  height = 6,
+  dpi = 300
+)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
